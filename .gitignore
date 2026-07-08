@@ -1,0 +1,21 @@
+# ============================================================
+# 小型双臂复合机器人系统 — monorepo .gitignore
+# 仅包含 ESP_ground / ESP_planner / Servo_test 三个工程
+# ============================================================
+
+# --- 排除根目录非工程文件/目录 ---
+002-总线舵机（ZP系列）/
+STServoBCL_keil_f103/
+地面站UI/
+小型双臂复合机器人系统.pdf
+提示词.txt
+
+# --- PlatformIO 构建产物 ---
+.pio/
+**/.pio/
+
+# --- IDE / 编辑器 ---
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
