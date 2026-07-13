@@ -61,4 +61,4 @@ constexpr TickType_t QUEUE_SEND_TIMEOUT = 0;  // 队列发送超时（0 = 不阻
 // ============================================================
 constexpr uint8_t PROTOCOL_MAX_PAYLOAD = 64;        // 协议帧最大 payload 长度
 constexpr uint8_t PROTOCOL_FRAME_MAX   = 128;       // 协议帧最大总长度（含帧头帧尾）
-constexpr uint8_t SERVO_CMD_BUF_SIZE   = 256;       // 舵机命令字符串缓冲区大小
+constexpr size_t SERVO_CMD_BUF_SIZE    = 256;       // 舵机命令字符串缓冲区大小

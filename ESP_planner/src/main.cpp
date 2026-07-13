@@ -52,6 +52,30 @@ static ProtocolParser jetsonParser;   // Jetson 解析器
 // 错误统计
 static uint32_t totalRxErrors = 0;
 
+// 地面站接收指示灯：收到完整有效地面站协议帧后短闪一次，便于脱离调试串口做最小验证。
+static volatile TickType_t groundRxLedOffTick = 0;
+
+static void pulseGroundRxLed() {
+    if (PIN_GROUND_RX_LED < 0) {
+        return;
+    }
+
+    digitalWrite(PIN_GROUND_RX_LED, GROUND_RX_LED_ON_LEVEL);
+    groundRxLedOffTick = xTaskGetTickCount() + pdMS_TO_TICKS(GROUND_RX_LED_PULSE_MS);
+}
+
+static void updateGroundRxLed() {
+    if (PIN_GROUND_RX_LED < 0 || groundRxLedOffTick == 0) {
+        return;
+    }
+
+    TickType_t now = xTaskGetTickCount();
+    if ((TickType_t)(now - groundRxLedOffTick) < (TickType_t)(UINT32_MAX / 2)) {
+        digitalWrite(PIN_GROUND_RX_LED, GROUND_RX_LED_OFF_LEVEL);
+        groundRxLedOffTick = 0;
+    }
+}
+
 // ============================================================
 // 串口接收函数
 // ============================================================
@@ -72,6 +96,9 @@ void receiveGroundSerial() {
 
         ProtocolFrame frame;
         if (groundParser.inputByte(byteIn, frame)) {
+            // 收到完整有效帧后再闪烁，表示地面站物理层与协议层均已通过。
+            pulseGroundRxLed();
+
             // 收到完整帧，投递到命令队列
             if (xQueueSend(systemCommandQueue, &frame, QUEUE_SEND_TIMEOUT) != pdTRUE) {
                 DebugSerial.println("[RX] 警告：系统命令队列已满，丢弃地面站帧");
@@ -119,6 +146,7 @@ void taskGroundStation(void* param) {
 
     while (true) {
         receiveGroundSerial();
+        updateGroundRxLed();
         vTaskDelay(pdMS_TO_TICKS(RX_TASK_DELAY));
     }
 }
@@ -166,7 +194,7 @@ void taskArm(void* param) {
             switch (funcCode) {
 
             case FuncCode::EMERGENCY_STOP:
-                ArmController::executeAction(ArmAction::EMERGENCY_STOP);
+                action = ArmAction::EMERGENCY_STOP;
                 break;
 
             case FuncCode::ARM_HOME:
@@ -326,6 +354,12 @@ void setup() {
     // --- 第1步：初始化 RobotState ---
     RobotState::begin();
     DebugSerial.println("[INIT] RobotState 已初始化");
+
+    if (PIN_GROUND_RX_LED >= 0) {
+        pinMode(PIN_GROUND_RX_LED, OUTPUT);
+        digitalWrite(PIN_GROUND_RX_LED, GROUND_RX_LED_OFF_LEVEL);
+        DebugSerial.printf("[INIT] 地面站接收指示灯 GPIO%d 已初始化\n", PIN_GROUND_RX_LED);
+    }
 
     // --- 第2步：初始化所有串口 ---
     SerialManager::beginAll();

@@ -80,34 +80,38 @@ ESP_planner/
 | 通道 | 用途 | 方向 | 默认串口对象 |
 |------|------|------|-------------|
 | 调试串口 | USB 日志输出 | 输出 | `Serial` (USB CDC) |
-| 地面站 | 人工控制指令 | 双向 | `Serial` (USB CDC, 与调试复用) |
-| Jetson | 物体识别结果 | 输入 | `Serial1` |
-| STM32 底盘 | 运动指令 | 输出 | `Serial2` |
-| 舵机控制板 | 舵机字符串指令 | 输出 | `Serial1` (与 Jetson 共享) |
+| 地面站/LORA | 无线 TTL 串口桥接地面站 | 双向 | `Serial1` |
+| 舵机控制板 | 舵机字符串指令 | 输出为主 | `Serial2` |
+| Jetson | 物体识别结果 | 输入 | `Serial0` RX |
+| STM32 底盘 | 运动指令 | 输出 | `Serial0` TX |
 
 ### 4.2 硬件串口数量限制
 
-**ESP32S3 实际可用硬件串口有限**（USB CDC + UART1 + UART2 ≈ 3 个独立通道）。
+**ESP32S3 可用硬件 UART 为 3 路（UART0/1/2），调试日志独立使用 USB CDC。**
 
-默认配置中 **ServoSerial 与 JetsonSerial 共享 Serial1**，仅保证代码可编译。实际部署时请根据接线调整：
+当前配置优先保证地面站无线 TTL 串口和舵机板独立通信，并将 **Jetson 输入与 STM32 输出安排到 UART0 的 RX/TX 两个方向**：
 
-**可选方案**：
-1. 使用 USB CDC 作为调试+地面站通道，释放更多硬件 UART
-2. 地面站使用独立无线串口模块（如 HC-12），接入 Serial1 或 Serial2
-3. 使用外接串口扩展模块（如 I2C 转 UART：SC16IS750）
-4. 通过宏切换：在 `HardwareConfig.h` 中修改 `#define ServoSerial Serial1` 为其他可用串口
-5. 舵机控制板和 Jetson 分时复用同一串口（需协调通信时序）
+**当前方案**：
+1. 使用 USB CDC 作为独立调试日志通道，不承载地面站协议
+2. 地面站无线 TTL 串口使用 Serial1：RX=GPIO18, TX=GPIO17
+3. 舵机控制板使用 Serial2：RX=GPIO11, TX=GPIO12（避开当前板载语音/LED 外设 GPIO10）
+4. Jetson 只向 ESP32 发送识别结果，接入 Serial0 RX=GPIO1
+5. ESP32 只向 STM32 发送底盘指令，使用 Serial0 TX=GPIO2
+6. 如果后续 Jetson/STM32 都需要双向通信，应使用外接 UART 扩展模块或增加控制器
+
+> 说明：GPIO19/GPIO20 通常被 ESP32S3 原生 USB CDC/JTAG 占用。为保证调试 USB 独立可用，当前未把 Jetson RX 放在 GPIO20。
 
 ### 4.3 当前默认映射
 
 所有串口配置在 [`include/config/HardwareConfig.h`](include/config/HardwareConfig.h) 中：
 
 ```cpp
-#define DebugSerial   Serial       // USB CDC
-#define GroundSerial  Serial       // USB CDC，与调试复用
-#define JetsonSerial  Serial1      // TX=GPIO17, RX=GPIO18
-#define ChassisSerial Serial2      // TX=GPIO4,  RX=GPIO5
-#define ServoSerial   Serial1      // TX=GPIO16, RX=GPIO15（与 Jetson 共享 Serial1）
+#define DebugSerial   Serial       // USB CDC，仅调试日志
+#define LoraSerial    Serial1      // RX=GPIO18, TX=GPIO17（无线 TTL 地面站）
+#define GroundSerial  LoraSerial
+#define ServoSerial   Serial2      // RX=GPIO11, TX=GPIO12（众灵舵机）
+#define JetsonSerial  Serial0      // RX=GPIO1，只接收 Jetson 识别结果
+#define ChassisSerial Serial0      // TX=GPIO2，只发送 STM32 底盘指令
 ```
 
 ### 4.4 修改 RX/TX 引脚
@@ -115,8 +119,10 @@ ESP_planner/
 在 `HardwareConfig.h` 中修改对应 `PIN_*_TX` / `PIN_*_RX` 常量即可：
 
 ```cpp
-constexpr int PIN_JETSON_TX = 17;   // 改为你的实际 TX 引脚
-constexpr int PIN_JETSON_RX = 18;   // 改为你的实际 RX 引脚
+constexpr int LORA_RX_PIN = 18;     // 地面站无线 TTL RX
+constexpr int LORA_TX_PIN = 17;     // 地面站无线 TTL TX
+constexpr int PIN_SERVO_RX = 11;    // 舵机板 TX -> ESP32 RX（可选回传）
+constexpr int PIN_SERVO_TX = 12;    // ESP32 TX -> 舵机板 RX
 ```
 
 ### 4.5 `setPins()` 参数顺序说明
@@ -129,12 +135,12 @@ void setPins(int8_t rxPin, int8_t txPin, int8_t ctsPin = -1, int8_t rtsPin = -1)
 //            RX first ^^^^^^    TX second ^^^^^^
 ```
 
-**但本工程使用顺序可能与之不同**。实际工程中 `setPins()` 的有效参数顺序取决于 Arduino Core 版本。
+本工程已按 Servo_test 实测结论统一使用 RX 在前、TX 在后的顺序。
 
 在 [`src/comm/SerialManager.cpp`](src/comm/SerialManager.cpp) 的 `initSerial()` 函数中，当前使用：
 
 ```cpp
-serial.setPins(txPin, rxPin);   // 第1个参数是TX，第2个是RX
+serial.setPins(rxPin, txPin);   // 第1个参数是RX，第2个参数是TX
 ```
 
 ### 4.6 串口无数据时的检查清单
@@ -144,10 +150,42 @@ serial.setPins(txPin, rxPin);   // 第1个参数是TX，第2个是RX
 1. **TX/RX 是否接反** — 最常⭒的问题，交叉连接试试
 2. **GND 是否共地** — 两个设备必须共地
 3. **波特率是否一致** — 双方波特率必须相同
-4. **`setPins()` 参数顺序是否正确** — 尝试交换为 `setPins(RX, TX)` 或 `setPins(TX, RX)`
-5. **是否占用了启动相关 GPIO** — ESP32S3 的 GPIO0, GPIO2, GPIO12, GPIO15 等有特殊功能
-6. **是否多个设备共用了同一串口** — 检查 `HardwareConfig.h` 中是否有串口对象冲突
-7. **是否需要外接串口扩展模块** — 如果硬件串口确实不够用
+4. **`setPins()` 参数顺序是否正确** — 当前工程统一使用 `setPins(RX, TX)`
+5. **是否占用了启动/USB相关 GPIO** — ESP32S3 的 GPIO0、GPIO2、GPIO19、GPIO20 等需结合板卡原理图确认
+6. **是否多个设备共用了同一串口** — 当前仅 Jetson 输入与 STM32 输出共用 UART0，舵机和地面站均为独立串口
+7. **是否需要外接串口扩展模块** — 如果后续所有外设都需要双向独立串口
+
+### 4.7 地面站接收 LED 最小验证
+
+当前板载语音/LED 外设使用 GPIO10，因此舵机控制板串口已调整为 `Serial2 RX=GPIO11, TX=GPIO12`，GPIO10 用作地面站接收指示灯：
+
+```cpp
+constexpr int PIN_VOICE_AND_LED = 10;
+constexpr int PIN_GROUND_RX_LED = PIN_VOICE_AND_LED;
+constexpr uint32_t GROUND_RX_LED_PULSE_MS = 80;
+```
+
+地面站串口仍为 `Serial1 RX=GPIO18, TX=GPIO17`，接线关系：
+
+| ESP32S3 | 地面站/无线串口模块 |
+|---------|---------------------|
+| GPIO18 / RX | 对方 TX |
+| GPIO17 / TX | 对方 RX |
+| GND | GND |
+
+验证流程：
+
+1. 先用“任意字节触发闪烁”验证物理接收链路：只要 `GroundSerial.read()` 读到字节，就让 GPIO10 短闪。已在现场确认：GPIO10 定义正确时，地面站发数据可观察到 LED 闪烁。
+2. 物理链路确认后，改为当前正式逻辑：只有 `groundParser.inputByte(byteIn, frame)` 返回 `true`，即收到完整且 CRC/帧格式通过的协议帧后，GPIO10 才短闪。
+3. 当前代码的 LED 含义：
+
+| LED 现象 | 判断 |
+|----------|------|
+| 完全不闪 | ESP32 的 `Serial1 RX=GPIO18` 没收到可处理字节，优先检查 TX/RX、GND、波特率、无线模块透明传输 |
+| 任意字节测试会闪，但正式逻辑不闪 | 物理层已通，但协议帧不合法，重点检查帧头、长度、CRC16、帧尾、目标地址 |
+| 正式逻辑会闪 | 地面站到 ESP32 的物理层与协议层均已通过，后续再验证 ACK/状态返回和业务路由 |
+
+注意：调试日志当前走 USB CDC。串口监视器中只能看到 `ESP-ROM` 启动日志时，通常说明打开的是 UART0/Boot ROM 对应 COM 口，不一定是工程 `DebugSerial` 的 USB CDC 日志口。
 
 ## 五、通信协议说明
 

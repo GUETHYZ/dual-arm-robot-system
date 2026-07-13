@@ -31,8 +31,8 @@ bool ArmController::executeAction(ArmAction action) {
         return false;
     }
 
-    // 检查急停标志
-    if (emergencyFlag) {
+    // 检查急停标志。急停动作本身必须允许执行，否则无法发送 PDST/PULK。
+    if (emergencyFlag && action != ArmAction::EMERGENCY_STOP) {
         DebugSerial.println("[ARM] 急停状态，拒绝执行动作");
         return false;
     }

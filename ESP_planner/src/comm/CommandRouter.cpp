@@ -42,9 +42,14 @@ void taskCommandRouter(void* param) {
             if (digitalRead(PIN_EMERGENCY_STOP) == LOW) {  // 低电平有效
                 // 触发急停
                 ProtocolFrame estopFrame;
-                estopFrame.funcCode = FuncCode::EMERGENCY_STOP;
+                estopFrame.version  = PROTOCOL_VERSION;
                 estopFrame.srcAddr  = ESP32_ADDR;
                 estopFrame.dstAddr  = ESP32_ADDR;
+                estopFrame.msgType  = MsgType::CMD;
+                estopFrame.funcCode = FuncCode::EMERGENCY_STOP;
+                estopFrame.seqNum   = RobotState::getNextSeqNum();
+                estopFrame.dataLen  = 0;
+                estopFrame.valid    = true;
                 routeCommand(estopFrame);
             }
         }
@@ -105,6 +110,10 @@ void routeCommand(const ProtocolFrame& frame) {
             RobotState::setEmergencyStop(true);
             RobotState::setSystemMode(SystemMode::EMERGENCY);
             ArmController::emergencyStop();
+
+            // 立即下发舵机停止/释力，避免等待 ARM 任务从当前动作组返回。
+            ArmController::stopAllServos();
+            ArmController::torqueOffAll();
 
             // 向 STM32 转发停止
             {

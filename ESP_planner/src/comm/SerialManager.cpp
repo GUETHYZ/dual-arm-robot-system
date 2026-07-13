@@ -29,49 +29,23 @@ void SerialManager::beginAll() {
         DebugSerial.println("[SERIAL] 错误：Mutex 创建失败！");
     }
 
-    // 调试串口（USB CDC，通常无需额外配置）
-    // 如果 DebugSerial 和 GroundSerial 都是 USB Serial，只需 begin 一次
+    // 调试串口：USB CDC，仅用于日志输出，不参与业务通信。
     DebugSerial.begin(DEBUG_BAUD);
-    // 等待 USB CDC 连接稳定
     delay(100);
-    DebugSerial.println("[SERIAL] 调试串口已启动 (USB CDC)");
+    DebugSerial.println("[SERIAL] 调试串口已启动 (USB CDC，业务串口不复用)");
 
-    // 地面站串口
-    if (&GroundSerial != &DebugSerial) {
-        // 地面站使用独立串口
-        initSerial(GroundSerial, PIN_GROUND_TX, PIN_GROUND_RX,
-                   GROUND_BAUD, "地面站");
-    } else {
-        DebugSerial.println("[SERIAL] 地面站串口 = 调试串口 (USB CDC 复用)");
-    }
+    // 地面站无线 TTL 串口：Serial1 RX=GPIO18, TX=GPIO17。
+    initSerial(GroundSerial, PIN_GROUND_RX, PIN_GROUND_TX,
+               GROUND_BAUD, "地面站/LORA");
 
-    // Jetson 串口
-    if (&JetsonSerial != &GroundSerial && &JetsonSerial != &DebugSerial) {
-        initSerial(JetsonSerial, PIN_JETSON_TX, PIN_JETSON_RX,
-                   JETSON_BAUD, "Jetson");
-    } else {
-        DebugSerial.println("[SERIAL] Jetson 串口与调试/地面站串口共享");
-    }
+    // 舵机控制板串口：Serial2 RX=GPIO11, TX=GPIO12。
+    initSerial(ServoSerial, PIN_SERVO_RX, PIN_SERVO_TX,
+               SERVO_BAUD, "舵机控制板");
 
-    // 底盘串口
-    if (&ChassisSerial != &JetsonSerial && &ChassisSerial != &GroundSerial
-        && &ChassisSerial != &DebugSerial) {
-        initSerial(ChassisSerial, PIN_CHASSIS_TX, PIN_CHASSIS_RX,
-                   CHASSIS_BAUD, "STM32底盘");
-    } else {
-        DebugSerial.println("[SERIAL] 警告：底盘串口与其他串口共享硬件！");
-        DebugSerial.println("[SERIAL] 请检查 HardwareConfig.h 中的串口配置");
-    }
-
-    // 舵机串口
-    if (&ServoSerial != &ChassisSerial && &ServoSerial != &JetsonSerial
-        && &ServoSerial != &GroundSerial && &ServoSerial != &DebugSerial) {
-        initSerial(ServoSerial, PIN_SERVO_TX, PIN_SERVO_RX,
-                   SERVO_BAUD, "舵机控制板");
-    } else {
-        DebugSerial.println("[SERIAL] 警告：舵机串口与其他串口共享硬件！");
-        DebugSerial.println("[SERIAL] 请检查 HardwareConfig.h 中的串口配置");
-    }
+    // Jetson 与 STM32 单向复用 UART0：RX 接 Jetson，TX 接 STM32。
+    initSerial(JetsonSerial, PIN_SHARED_RX, PIN_SHARED_TX,
+               JETSON_BAUD, "Jetson/STM32共享串口");
+    DebugSerial.println("[SERIAL] STM32底盘与 Jetson 共用 UART0（RX接Jetson，TX接STM32）");
 
     // 舵机方向控制引脚
     if (PIN_SERVO_DIR >= 0) {
@@ -100,16 +74,14 @@ void SerialManager::beginAll() {
     DebugSerial.println("[SERIAL] 所有串口初始化完成");
 }
 
-void SerialManager::initSerial(HardwareSerial& serial, int txPin, int rxPin,
+void SerialManager::initSerial(HardwareSerial& serial, int rxPin, int txPin,
                                uint32_t baud, const char* name) {
-    // 注意：setPins() 参数顺序可能因 Arduino Core 版本不同而异
-    // 本工程默认使用 setPins(TX, RX) 顺序
-    // 如果串口无数据，请尝试交换为 setPins(RX, TX)
-    serial.setPins(txPin, rxPin);
-    serial.begin(baud);
+    // Arduino-ESP32 HardwareSerial::setPins(rxPin, txPin)，RX 在前、TX 在后。
+    serial.setPins(rxPin, txPin);
+    serial.begin(baud, SERIAL_8N1);
 
-    DebugSerial.printf("[SERIAL] %s 串口已启动 (TX=GPIO%d, RX=GPIO%d, Baud=%d)\n",
-                       name, txPin, rxPin, baud);
+    DebugSerial.printf("[SERIAL] %s 串口已启动 (RX=GPIO%d, TX=GPIO%d, Baud=%d)\n",
+                       name, rxPin, txPin, baud);
 }
 
 // ============================================================
@@ -151,7 +123,8 @@ bool SerialManager::sendToGround(const uint8_t* data, size_t len) {
 }
 
 bool SerialManager::sendToJetson(const uint8_t* data, size_t len) {
-    return sendBinary(JetsonSerial, jetsonMutex, data, len, "Jetson");
+    DebugSerial.println("[SERIAL] 当前拓扑下 Jetson 仅接收输入，不支持向 Jetson 发送");
+    return false;
 }
 
 bool SerialManager::sendToChassis(const uint8_t* data, size_t len) {
@@ -170,13 +143,17 @@ bool SerialManager::sendToServo(const char* cmd) {
     }
 
     size_t written = ServoSerial.write((const uint8_t*)cmd, len);
+    // 与 Servo_test 工程和厂家示例保持一致：命令以 '!' 结束后追加 CRLF。
+    written += ServoSerial.write('\r');
+    written += ServoSerial.write('\n');
     ServoSerial.flush();
 
     xSemaphoreGive(servoMutex);
 
-    if (written != len) {
+    const size_t expected = len + 2;
+    if (written != expected) {
         DebugSerial.printf("[SERIAL] 错误：舵机发送不完整 (%d/%d 字节)\n",
-                          (int)written, (int)len);
+                          (int)written, (int)expected);
         return false;
     }
 

@@ -23,13 +23,12 @@ public:
     /**
      * @brief 初始化所有串口
      *
-     * 对每个串口：
-     * 1. 如果不是 USB Serial，则调用 setPins() 配置引脚
+     * 对每个业务串口：
+     * 1. 调用 setPins(rxPin, txPin) 配置引脚映射
      * 2. 调用 begin(baud) 启动串口
      *
-     * 注意：setPins() 参数顺序因 Arduino Core 版本而异。
-     * 本工程默认使用 setPins(TX, RX)。如果串口无数据，
-     * 请尝试交换为 setPins(RX, TX)。
+     * 注意：DebugSerial 独立使用 USB CDC；地面站、舵机、Jetson/STM32 均使用硬件 UART。
+     * Arduino-ESP32 HardwareSerial::setPins() 参数顺序为 RX 在前、TX 在后。
      */
     static void beginAll();
 
@@ -90,7 +89,7 @@ private:
     static SemaphoreHandle_t servoMutex;
 
     // 初始化单个串口
-    static void initSerial(HardwareSerial& serial, int txPin, int rxPin,
+    static void initSerial(HardwareSerial& serial, int rxPin, int txPin,
                            uint32_t baud, const char* name);
 
     // 通用二进制发送
