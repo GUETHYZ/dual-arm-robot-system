@@ -3,3 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# 硬件参考资料（不纳入版本控制）
+../001-ZLink USB串口总线模块/
+../012-24路舵机控制器/

@@ -81,6 +81,65 @@ static void updateGroundRxLed() {
 // ============================================================
 
 /**
+ * @brief 将地面站帧投递到系统命令队列
+ *
+ * CHASSIS_STOP 是移动按钮弹起后的安全停止帧，必须优先于旧方向命令处理。
+ */
+static bool enqueueGroundFrame(const ProtocolFrame& frame) {
+    if (systemCommandQueue == nullptr) {
+        return false;
+    }
+
+    const bool isChassisStop = (frame.msgType == MsgType::CMD)
+        && (frame.funcCode == FuncCode::CHASSIS_STOP)
+        && (frame.dstAddr == ESP32_ADDR || frame.dstAddr == BROADCAST_ADDR);
+
+    if (!isChassisStop) {
+        return xQueueSend(systemCommandQueue, &frame, QUEUE_SEND_TIMEOUT) == pdTRUE;
+    }
+
+    // 清理尚未路由的旧底盘命令，避免 STOP 后又执行积压的方向命令。
+    ProtocolFrame preserved[QUEUE_LEN_SYSTEM_CMD];
+    UBaseType_t preservedCount = 0;
+    UBaseType_t droppedChassisCount = 0;
+    UBaseType_t droppedOverflowCount = 0;
+    const UBaseType_t maxPreserved = QUEUE_LEN_SYSTEM_CMD - 1;
+
+    ProtocolFrame queuedFrame;
+    while (xQueueReceive(systemCommandQueue, &queuedFrame, 0) == pdTRUE) {
+        if (isChassisCommand(queuedFrame.funcCode)) {
+            droppedChassisCount++;
+            continue;
+        }
+
+        if (preservedCount < maxPreserved) {
+            preserved[preservedCount++] = queuedFrame;
+        } else {
+            droppedOverflowCount++;
+        }
+    }
+
+    const BaseType_t stopQueued = xQueueSendToFront(systemCommandQueue, &frame, QUEUE_SEND_TIMEOUT);
+
+    for (UBaseType_t i = 0; i < preservedCount; i++) {
+        if (xQueueSend(systemCommandQueue, &preserved[i], QUEUE_SEND_TIMEOUT) != pdTRUE) {
+            droppedOverflowCount++;
+        }
+    }
+
+    if (droppedChassisCount > 0 || droppedOverflowCount > 0) {
+        DebugSerial.printf("[RX] CHASSIS_STOP 优先入队：丢弃旧底盘命令 %u 条，非底盘溢出 %u 条\n",
+                          (unsigned)droppedChassisCount, (unsigned)droppedOverflowCount);
+    }
+
+    if (droppedOverflowCount > 0) {
+        totalRxErrors += droppedOverflowCount;
+    }
+
+    return stopQueued == pdTRUE;
+}
+
+/**
  * @brief 地面站串口接收
  *
  * 从地面站串口读取字节，逐字节喂给协议解析器。
@@ -99,8 +158,8 @@ void receiveGroundSerial() {
             // 收到完整有效帧后再闪烁，表示地面站物理层与协议层均已通过。
             pulseGroundRxLed();
 
-            // 收到完整帧，投递到命令队列
-            if (xQueueSend(systemCommandQueue, &frame, QUEUE_SEND_TIMEOUT) != pdTRUE) {
+            // 收到完整帧，投递到命令队列；底盘 STOP 需要高优先级处理。
+            if (!enqueueGroundFrame(frame)) {
                 DebugSerial.println("[RX] 警告：系统命令队列已满，丢弃地面站帧");
                 totalRxErrors++;
             }

@@ -170,12 +170,17 @@ void routeCommand(const ProtocolFrame& frame) {
     // 小车底盘类命令 → 转发给 STM32
     // ============================================================
     if (isChassisCommand(funcCode)) {
-        // 重新打包帧，目标地址改为 STM32
+        // 重新打包帧，源/目标地址改为 ESP32 → STM32，并使用 ESP32 下游序列号。
         ProtocolFrame chassisFrame = frame;
         chassisFrame.srcAddr = ESP32_ADDR;
         chassisFrame.dstAddr = STM32_ADDR;
+        chassisFrame.seqNum = RobotState::getNextSeqNum();
 
-        DebugSerial.printf("[CMD] 转发底盘命令 0x%02X → STM32\n", funcCode);
+        if (funcCode == FuncCode::CHASSIS_STOP) {
+            DebugSerial.println("[CMD] 优先转发底盘停止 0x16 → STM32");
+        } else {
+            DebugSerial.printf("[CMD] 转发底盘命令 0x%02X → STM32\n", funcCode);
+        }
         SerialManager::sendFrame(chassisFrame, 'C');
         return;
     }
