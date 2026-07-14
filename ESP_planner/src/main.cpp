@@ -428,6 +428,7 @@ void setup() {
 
     // --- 第4步：初始化机械臂控制器 ---
     ArmController::begin();
+    ArmController::executeAction(ArmAction::HOME);
 
     // --- 第5步：创建队列 ---
     systemCommandQueue = xQueueCreate(QUEUE_LEN_SYSTEM_CMD, sizeof(ProtocolFrame));

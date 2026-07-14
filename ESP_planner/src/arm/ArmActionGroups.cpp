@@ -26,7 +26,70 @@
 // ============================================================
 // 动作组数据
 // ============================================================
+static constexpr uint16_t MOVE_MS = 1000;
+static constexpr uint16_t WAIT_MS = 1200;
+static constexpr uint16_t READY_WAIT_MS = 300;
+
+#define STEP_READY(moveMs, waitMs) \
+    {{ \
+        {LEFT_SHOULDER_ID,  1233, moveMs}, \
+        {LEFT_ELBOW_ID,      951, moveMs}, \
+        {LEFT_GRIPPER_ID, SERVO_PWM_UNUSED, moveMs}, \
+        {RIGHT_SHOULDER_ID, 1818, moveMs}, \
+        {RIGHT_ELBOW_ID,     890, moveMs}, \
+        {RIGHT_GRIPPER_ID, SERVO_PWM_UNUSED, moveMs}, \
+    }, 6, waitMs}
+
+#define STEP_PICK(moveMs, waitMs) \
+    {{ \
+        {LEFT_SHOULDER_ID,   541, moveMs}, \
+        {LEFT_ELBOW_ID,      951, moveMs}, \
+        {LEFT_GRIPPER_ID, SERVO_PWM_UNUSED, moveMs}, \
+        {RIGHT_SHOULDER_ID, 2377, moveMs}, \
+        {RIGHT_ELBOW_ID,     890, moveMs}, \
+        {RIGHT_GRIPPER_ID, SERVO_PWM_UNUSED, moveMs}, \
+    }, 6, waitMs}
+
+#define STEP_LIFT(moveMs, waitMs) \
+    {{ \
+        {LEFT_SHOULDER_ID,   541, moveMs}, \
+        {LEFT_ELBOW_ID,      513, moveMs}, \
+        {LEFT_GRIPPER_ID, SERVO_PWM_UNUSED, moveMs}, \
+        {RIGHT_SHOULDER_ID, 2377, moveMs}, \
+        {RIGHT_ELBOW_ID,    1474, moveMs}, \
+        {RIGHT_GRIPPER_ID, SERVO_PWM_UNUSED, moveMs}, \
+    }, 6, waitMs}
+
+#define STEP_PLACE(moveMs, waitMs) \
+    {{ \
+        {LEFT_SHOULDER_ID,   870, moveMs}, \
+        {LEFT_ELBOW_ID,      513, moveMs}, \
+        {LEFT_GRIPPER_ID, SERVO_PWM_UNUSED, moveMs}, \
+        {RIGHT_SHOULDER_ID, 1892, moveMs}, \
+        {RIGHT_ELBOW_ID,    1474, moveMs}, \
+        {RIGHT_GRIPPER_ID, SERVO_PWM_UNUSED, moveMs}, \
+    }, 6, waitMs}
+
 const ActionGroup actionGroups[] = {
+    {"READY", { STEP_READY(MOVE_MS, READY_WAIT_MS), }, 1},
+    {"LEFT_PICK", { STEP_PICK(MOVE_MS, WAIT_MS), STEP_LIFT(MOVE_MS, WAIT_MS), }, 2},
+    {"LEFT_PLACE", { STEP_PLACE(MOVE_MS, WAIT_MS), STEP_READY(MOVE_MS, READY_WAIT_MS), }, 2},
+    {"RIGHT_PICK", { STEP_PICK(MOVE_MS, WAIT_MS), STEP_LIFT(MOVE_MS, WAIT_MS), }, 2},
+    {"RIGHT_PLACE", { STEP_PLACE(MOVE_MS, WAIT_MS), STEP_READY(MOVE_MS, READY_WAIT_MS), }, 2},
+    {"BOTH_PICK", { STEP_PICK(MOVE_MS, WAIT_MS), STEP_LIFT(MOVE_MS, WAIT_MS), }, 2},
+    {"BOTH_PLACE", { STEP_PLACE(MOVE_MS, WAIT_MS), STEP_READY(MOVE_MS, READY_WAIT_MS), }, 2},
+    {"STOP_ALL", {{{}, 0, 0}}, 0},
+    {"EMERGENCY_STOP", {{{}, 0, 0}}, 0},
+    {"TORQUE_OFF_ALL", {{{}, 0, 0}}, 0},
+    {"TORQUE_ON_ALL", {{{}, 0, 0}}, 0},
+};
+#undef STEP_PLACE
+#undef STEP_LIFT
+#undef STEP_PICK
+#undef STEP_READY
+
+#if 0
+const ActionGroup oldActionGroups[] = {
 
     // --------------------------------------------------------
     // ACTION 0: 双臂复位 (HOME)
@@ -239,4 +302,5 @@ const ActionGroup actionGroups[] = {
         0
     },
 
-}; // actionGroups[]
+}; // oldActionGroups[]
+#endif

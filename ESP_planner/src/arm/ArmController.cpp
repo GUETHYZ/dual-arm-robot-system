@@ -136,8 +136,8 @@ bool ArmController::isEmergencyStopped() {
 
 void ArmController::stopAllServos() {
     const uint8_t ids[TOTAL_SERVO_COUNT] = {
-        LEFT_BASE_ID, LEFT_SHOULDER_ID, LEFT_ELBOW_ID, LEFT_GRIPPER_ID,
-        RIGHT_BASE_ID, RIGHT_SHOULDER_ID, RIGHT_ELBOW_ID, RIGHT_GRIPPER_ID
+        LEFT_SHOULDER_ID, LEFT_ELBOW_ID, LEFT_GRIPPER_ID,
+        RIGHT_SHOULDER_ID, RIGHT_ELBOW_ID, RIGHT_GRIPPER_ID
     };
     BusServoDriver::stopAll(ids, TOTAL_SERVO_COUNT);
 }

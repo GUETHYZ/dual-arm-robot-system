@@ -34,11 +34,11 @@ void SerialManager::beginAll() {
     delay(100);
     DebugSerial.println("[SERIAL] 调试串口已启动 (USB CDC，业务串口不复用)");
 
-    // 地面站无线 TTL 串口：Serial1 RX=GPIO18, TX=GPIO17。
+    // 地面站无线 TTL 串口：物理引脚 RX=GPIO18, TX=GPIO17。
     initSerial(GroundSerial, PIN_GROUND_RX, PIN_GROUND_TX,
                GROUND_BAUD, "地面站/LORA");
 
-    // 舵机控制板串口：Serial2 RX=GPIO11, TX=GPIO12。
+    // 舵机控制板串口：物理引脚 RX=GPIO11, TX=GPIO12。
     initSerial(ServoSerial, PIN_SERVO_RX, PIN_SERVO_TX,
                SERVO_BAUD, "舵机控制板");
 
@@ -142,10 +142,9 @@ bool SerialManager::sendToServo(const char* cmd) {
         return false;
     }
 
-    size_t written = ServoSerial.write((const uint8_t*)cmd, len);
-    // 与 Servo_test 工程和厂家示例保持一致：命令以 '!' 结束后追加 CRLF。
-    written += ServoSerial.write('\r');
-    written += ServoSerial.write('\n');
+    // 与 Servo_test/ZServoDriver 保持一致：ASCII 命令 + println() 行尾。
+    size_t written = ServoSerial.print(cmd);
+    written += ServoSerial.println();
     ServoSerial.flush();
 
     xSemaphoreGive(servoMutex);

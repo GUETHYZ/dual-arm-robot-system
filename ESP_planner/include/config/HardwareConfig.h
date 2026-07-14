@@ -10,14 +10,14 @@
  *    - 调试日志独立走 ESP32S3 USB CDC，不与任何业务串口复用。
  *    - platformio.ini 启用 ARDUINO_USB_CDC_ON_BOOT=1，用于释放 UART0 给业务串口。
  *
- * 2. GroundSerial / LoraSerial = Serial1，无线 TTL 串口桥接地面站
- *    - Serial1 RX = GPIO18，连接无线串口模块 TX
- *    - Serial1 TX = GPIO17，连接无线串口模块 RX
+ * 2. GroundSerial / LoraSerial = Serial2，无线 TTL 串口桥接地面站
+ *    - Serial2 RX = GPIO18，连接无线串口模块 TX
+ *    - Serial2 TX = GPIO17，连接无线串口模块 RX
  *    - 地面站协议不再复用 USB 调试口。
  *
- * 3. ServoSerial = Serial2，众灵 ZP 舵机控制板
- *    - Serial2 RX = GPIO11，连接舵机驱动板 TX（如驱动板无回传可不接）
- *    - Serial2 TX = GPIO12，连接舵机驱动板 RX
+ * 3. ServoSerial = Serial1，众灵 ZP 舵机控制板
+ *    - Serial1 RX = GPIO11，连接舵机驱动板 TX（如驱动板无回传可不接）
+ *    - Serial1 TX = GPIO12，连接舵机驱动板 RX
  *
  * 4. JetsonSerial / ChassisSerial = Serial0，单 UART 单向复用
  *    - Serial0 RX = GPIO1，接 Jetson TX，仅接收视觉识别帧
@@ -52,10 +52,10 @@ constexpr uint32_t DEBUG_BAUD = 115200;
 // 地面站通过无线 TTL 串口桥接，不再复用 USB 调试口。
 // Arduino-ESP32 HardwareSerial::setPins(rxPin, txPin)：RX 在前，TX 在后。
 // ============================================================
-#define LoraSerial Serial1
+#define LoraSerial Serial2
 #define GroundSerial LoraSerial
-constexpr int LORA_RX_PIN = 18;     // Serial1 RX: 无线串口模块 TX -> ESP32 RX
-constexpr int LORA_TX_PIN = 17;     // Serial1 TX: ESP32 TX -> 无线串口模块 RX
+constexpr int LORA_RX_PIN = 18;     // RX: 无线串口模块 TX -> ESP32 RX
+constexpr int LORA_TX_PIN = 17;     // TX: ESP32 TX -> 无线串口模块 RX
 constexpr int PIN_GROUND_RX = LORA_RX_PIN;
 constexpr int PIN_GROUND_TX = LORA_TX_PIN;
 constexpr uint32_t GROUND_BAUD = 115200;
@@ -81,9 +81,9 @@ static_assert(JETSON_BAUD == CHASSIS_BAUD, "Jetson 和 STM32 复用同一个 UAR
 // 众灵舵机控制板串口
 // 优先保证舵机板独立串口；如驱动板无回传，RX 可不接。
 // ============================================================
-#define ServoSerial Serial2
-constexpr int PIN_SERVO_RX = 11;    // Serial2 RX: 舵机驱动板 TX -> ESP32 RX（可选）
-constexpr int PIN_SERVO_TX = 12;    // Serial2 TX: ESP32 TX -> 舵机驱动板 RX
+#define ServoSerial Serial1
+constexpr int PIN_SERVO_RX = 11;    // RX: 舵机驱动板 TX -> ESP32 RX（可选）
+constexpr int PIN_SERVO_TX = 12;    // TX: ESP32 TX -> 舵机驱动板 RX
 constexpr uint32_t SERVO_BAUD = 115200;
 
 // ============================================================

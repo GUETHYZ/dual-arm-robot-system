@@ -14,6 +14,12 @@
 // 静态成员定义
 char BusServoDriver::cmdBuffer[SERVO_CMD_BUF_SIZE];
 
+namespace {
+bool isUnusedPose(const ServoPose& pose) {
+    return pose.pwm == SERVO_PWM_UNUSED;
+}
+}
+
 void BusServoDriver::begin() {
     DebugSerial.println("[SERVO] 总线舵机驱动已就绪");
 }
@@ -77,14 +83,19 @@ size_t BusServoDriver::buildMultiServoCmd(const ServoPose* poses, uint8_t count,
                                           char* buffer, size_t bufSize) {
     if (count == 0 || poses == nullptr) return 0;
     if (count > TOTAL_SERVO_COUNT) count = TOTAL_SERVO_COUNT;
+    if (bufSize < 3) return 0;
 
     size_t pos = 0;
+    uint8_t activeCount = 0;
 
     // 开头 {
-    if (pos < bufSize) buffer[pos++] = '{';
-    else return 0;
+    buffer[pos++] = '{';
 
     for (uint8_t i = 0; i < count; i++) {
+        if (isUnusedPose(poses[i])) {
+            continue;
+        }
+
         int written = snprintf(buffer + pos, bufSize - pos,
                                "#%03dP%04dT%04d!",
                                poses[i].id, poses[i].pwm, poses[i].timeMs);
@@ -92,11 +103,14 @@ size_t BusServoDriver::buildMultiServoCmd(const ServoPose* poses, uint8_t count,
             return 0;  // 缓冲区不足
         }
         pos += written;
+        activeCount++;
     }
 
+    if (activeCount == 0) return 0;
+
     // 结尾 }
-    if (pos < bufSize) buffer[pos++] = '}';
-    else return 0;
+    if (pos >= bufSize - 1) return 0;
+    buffer[pos++] = '}';
 
     buffer[pos] = '\0';
     return pos;
@@ -105,12 +119,32 @@ size_t BusServoDriver::buildMultiServoCmd(const ServoPose* poses, uint8_t count,
 bool BusServoDriver::moveServos(const ServoPose* poses, uint8_t count) {
     if (poses == nullptr || count == 0) return false;
 
-    // 校验所有参数
+    // 校验所有有效姿态；PWM=0 是动作组占位，不发送给控制板。
+    uint8_t activeCount = 0;
+    const ServoPose* singleActivePose = nullptr;
+
     for (uint8_t i = 0; i < count; i++) {
+        if (isUnusedPose(poses[i])) {
+            continue;
+        }
+
         if (!checkId(poses[i].id) || !checkPwm(poses[i].pwm)
             || !checkTime(poses[i].timeMs)) {
             return false;
         }
+
+        activeCount++;
+        singleActivePose = &poses[i];
+    }
+
+    if (activeCount == 0) {
+        DebugSerial.println("[SERVO] 组合命令没有有效姿态，跳过发送");
+        return true;
+    }
+
+    if (activeCount == 1 && singleActivePose != nullptr) {
+        return moveServo(singleActivePose->id, singleActivePose->pwm,
+                         singleActivePose->timeMs);
     }
 
     size_t len = buildMultiServoCmd(poses, count, cmdBuffer, SERVO_CMD_BUF_SIZE);
@@ -179,8 +213,8 @@ bool BusServoDriver::torqueOn(uint8_t id) {
 bool BusServoDriver::torqueOffAll() {
     // 对全部 8 个舵机发送释力指令
     const uint8_t ids[TOTAL_SERVO_COUNT] = {
-        LEFT_BASE_ID, LEFT_SHOULDER_ID, LEFT_ELBOW_ID, LEFT_GRIPPER_ID,
-        RIGHT_BASE_ID, RIGHT_SHOULDER_ID, RIGHT_ELBOW_ID, RIGHT_GRIPPER_ID
+        LEFT_SHOULDER_ID, LEFT_ELBOW_ID, LEFT_GRIPPER_ID,
+        RIGHT_SHOULDER_ID, RIGHT_ELBOW_ID, RIGHT_GRIPPER_ID
     };
     bool allOk = true;
     for (uint8_t i = 0; i < TOTAL_SERVO_COUNT; i++) {
@@ -192,8 +226,8 @@ bool BusServoDriver::torqueOffAll() {
 
 bool BusServoDriver::torqueOnAll() {
     const uint8_t ids[TOTAL_SERVO_COUNT] = {
-        LEFT_BASE_ID, LEFT_SHOULDER_ID, LEFT_ELBOW_ID, LEFT_GRIPPER_ID,
-        RIGHT_BASE_ID, RIGHT_SHOULDER_ID, RIGHT_ELBOW_ID, RIGHT_GRIPPER_ID
+        LEFT_SHOULDER_ID, LEFT_ELBOW_ID, LEFT_GRIPPER_ID,
+        RIGHT_SHOULDER_ID, RIGHT_ELBOW_ID, RIGHT_GRIPPER_ID
     };
     bool allOk = true;
     for (uint8_t i = 0; i < TOTAL_SERVO_COUNT; i++) {

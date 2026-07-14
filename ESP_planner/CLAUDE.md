@@ -13,7 +13,7 @@ ESP32S3 双臂复合机器人主控系统 — 基于 PlatformIO + Arduino + Free
 地面站(无线串口) ─┐
                    ├→ ESP32S3 ──→ STM32F103 底盘 (麦克纳姆轮)
 Jetson Nano ──────┘      │
-                          └──→ 众灵总线舵机控制板 ×8 (双机械臂, 3DOF×2)
+                          └──→ 众灵总线舵机控制板 ×6 (双机械臂, 肩/肘/夹具×2)
 ```
 
 ### 通信方式
@@ -21,8 +21,8 @@ Jetson Nano ──────┘      │
 | 通道 | 串口 | 方向 | 协议 |
 |------|------|------|------|
 | 调试日志 | USB CDC (`Serial`) | 输出 | 文本 |
-| 地面站/LORA | `Serial1` (RX=GPIO18, TX=GPIO17) | 双向 | 自定义二进制 |
-| 舵机控制板 | `Serial2` (RX=GPIO11, TX=GPIO12) | 输出为主 | 众灵ASCII字符串 |
+| 地面站/LORA | `Serial2` (RX=GPIO18, TX=GPIO17) | 双向 | 自定义二进制 |
+| 舵机控制板 | `Serial1` (RX=GPIO11, TX=GPIO12) | 输出为主 | 众灵ASCII字符串 |
 | Jetson | `Serial0` RX (GPIO1) | 输入 | 自定义二进制 |
 | STM32底盘 | `Serial0` TX (GPIO2) | 输出 | 自定义二进制 |
 
@@ -68,7 +68,7 @@ AA 55 | Ver | Src | Dst | Type | Func | Seq | Len | Data[0~64] | CRC16(LSB) | 0D
 
 - **系统类 0x00~0x0F**: 心跳、ACK/NACK、状态查询/上报、急停
 - **底盘类 0x10~0x1F**: 前进/后退/左移/右移/左转/右转/停止/矢量移动
-- **机械臂 0x20~0x2F**: HOME/左臂夹取/左臂放下/右臂夹取/右臂放下/双臂夹放/停止/扭力控制
+- **机械臂 0x20~0x2F**: HOME/夹取后上抬/放下/停止/扭力控制
 - **视觉类 0x30~0x3F**: OBJECT_INFO (Jetson→ESP32)
 
 ### ESP32 路由逻辑
@@ -87,7 +87,7 @@ ESP_planner/
 │   ├── config/
 │   │   ├── HardwareConfig.h          # 串口引脚、波特率、GPIO
 │   │   ├── DeviceConfig.h            # 设备地址、协议版本
-│   │   ├── ArmConfig.h               # 舵机ID(1~8)、PWM范围(500~2500)、动作组结构体
+│   │   ├── ArmConfig.h               # 舵机ID(000~005)、PWM范围(0500~2500)、动作组结构体
 │   │   └── TaskConfig.h              # 任务栈(3072~4096)、优先级(1~4)、队列长度
 │   ├── protocol/
 │   │   ├── Protocol.h                # 帧结构、功能码枚举、协议函数声明
@@ -122,36 +122,64 @@ ESP_planner/
 ### 舵机控制 (众灵协议)
 - 单舵机: `#000P1500T1000!` (ID=000, 位置=1500, 时间=1000ms)
 - 多舵机: `{#000P1500T1000!#001P1600T1000!}` (花括号包裹)
-- 舵机ID 1~4=左臂(底座/肩/肘/夹爪), 5~8=右臂(底座/肩/肘/夹爪)
+- 舵机ID 000~002=左臂(肩/肘/夹具), 003~005=右臂(肩/肘/夹具)
+- 发送方式已按 `../Servo_test` 实测工程对齐：`ServoSerial.print(cmd); ServoSerial.println(); ServoSerial.flush();`
+- 舵机串口必须使用 `Serial1.setPins(11, 12)` 这一组合；物理引脚仍为 RX=GPIO11、TX=GPIO12，不需要改线。
+- 动作组中的 `0000` 不是有效舵机位置，而是 `SERVO_PWM_UNUSED` 占位值；发送组合命令时会过滤，不会生成 `P0000`。
 
 ### 动作组 (ArmActionGroups)
-11个预设动作: HOME / LEFT_PICK / LEFT_PLACE / RIGHT_PICK / RIGHT_PLACE / BOTH_PICK / BOTH_PLACE / STOP_ALL / EMERGENCY_STOP / TORQUE_OFF_ALL / TORQUE_ON_ALL
+11个预设动作仍保留: HOME / LEFT_PICK / LEFT_PLACE / RIGHT_PICK / RIGHT_PLACE / BOTH_PICK / BOTH_PLACE / STOP_ALL / EMERGENCY_STOP / TORQUE_OFF_ALL / TORQUE_ON_ALL
 
-**所有PWM值为TODO占位值，需现场标定。** 动作组在 `src/arm/ArmActionGroups.cpp` 中修改。
+当前机械臂已更新为 6 舵机：
+- 000 / 003 = 肩关节
+- 001 / 004 = 肘关节
+- 002 / 005 = 夹具
+
+动作组表来自 `动作组.md`，当前写入值为：
+- 准备: `1233 0951 0000 1818 0890 0000`
+- 夹取: `0541 0951 0000 2377 0890 0000`
+- 上抬: `0541 0513 0000 2377 1474 0000`
+- 放下: `0870 0513 0000 1892 1474 0000`
+
+地面站逻辑为：
+- 点击“夹取”时，ESP32 依次执行“夹取”->“上抬”
+- 点击“放下”时，ESP32 执行“放下”->“准备”
+- 其余时间默认保持“准备”动作
+
+动作组在 `src/arm/ArmActionGroups.cpp` 中修改。
 
 ### setPins() 参数顺序
-Arduino-ESP32 `HardwareSerial::setPins(rxPin, txPin)` 当前按 RX 在前、TX 在后使用。当前地面站无线串口为 `Serial1.setPins(18, 17)`，表示 RX=GPIO18、TX=GPIO17；舵机板为 `Serial2.setPins(11, 12)`，表示 RX=GPIO11、TX=GPIO12。
+Arduino-ESP32 `HardwareSerial::setPins(rxPin, txPin)` 当前按 RX 在前、TX 在后使用。当前地面站无线串口为 `Serial2.setPins(18, 17)`，表示 RX=GPIO18、TX=GPIO17；舵机板为 `Serial1.setPins(11, 12)`，表示 RX=GPIO11、TX=GPIO12。
+
+### 舵机通信实测基准
+`../Servo_test` 工程已现场验证可稳定驱动所有已连接舵机。主工程舵机通道必须与该工程保持一致：
+- 物理引脚：RX=GPIO11、TX=GPIO12
+- UART 对象：`Serial1`
+- 波特率：115200, `SERIAL_8N1`
+- 发送尾部：ASCII 命令后调用空 `println()`，即追加 CRLF
+
+不要为排查舵机问题随意改动 `PIN_SERVO_RX` / `PIN_SERVO_TX` 的物理引脚号；如需调整，只能先确认现场接线同步修改。
 
 ### 地面站接收 LED 验证
-当前板载语音/LED 外设使用 GPIO10，舵机串口已避开 GPIO10 改为 Serial2 RX=GPIO11、TX=GPIO12。`PIN_GROUND_RX_LED = GPIO10` 用于现场最小验证：任意字节触发阶段已确认地面站物理接收链路可让 LED 闪烁；当前正式逻辑为只有 `groundParser.inputByte(byteIn, frame)` 解析出完整有效协议帧后才短闪，表示地面站到 ESP32 的物理层与协议层均已通过。
+当前板载语音/LED 外设使用 GPIO10，舵机串口已避开 GPIO10，物理引脚为 RX=GPIO11、TX=GPIO12。`PIN_GROUND_RX_LED = GPIO10` 用于现场最小验证：任意字节触发阶段已确认地面站物理接收链路可让 LED 闪烁；当前正式逻辑为只有 `groundParser.inputByte(byteIn, frame)` 解析出完整有效协议帧后才短闪，表示地面站到 ESP32 的物理层与协议层均已通过。
 
 ### 编译验证
-- 编译通过: RAM 6.0% (19548/327680), Flash 9.0% (301013/3342336)
+- 编译通过: RAM 9.7% (31856/327680), Flash 10.1% (336485/3342336)
 - 无第三方依赖，仅需 platform = espressif32 + framework = arduino
 
 ## 项目状态
 
 - [x] 完整工程代码 (编译通过)
 - [x] 通信协议文档 (docs/通信协议规范.md)
-- [ ] 舵机实际标定 (PWM值全为占位)
+- [ ] 舵机最终机械标定与安全范围复核
 - [ ] 硬件接线验证
 - [ ] 系统联调
 
 ## 重要提醒
 
-1. 修改 `ArmActionGroups.cpp` 中的PWM前必须先在实体舵机上测试安全范围
+1. `动作组.md` 中的 PWM 已写入代码，但修改 `ArmActionGroups.cpp` 前仍需先在实体舵机上测试安全范围
 2. 串口接线时注意TX/RX交叉、共地、波特率一致
-3. ESP32S3 硬件 UART 有限，当前 GroundSerial/LoraSerial 独占 Serial1，ServoSerial 独占 Serial2，JetsonSerial 与 ChassisSerial 共用 Serial0 的 RX/TX 两个方向
+3. ESP32S3 硬件 UART 有限，当前 ServoSerial 使用 Serial1 + GPIO11/12（对齐 Servo_test 实测工程），GroundSerial/LoraSerial 使用 Serial2 + GPIO18/17，JetsonSerial 与 ChassisSerial 共用 Serial0 的 RX/TX 两个方向
 4. DebugSerial 独立使用 USB CDC；不要让地面站协议复用 USB 调试口
 5. `BROADCAST_ADDR = 0x10` 是系统协议广播，众灵舵机自身广播ID=255，两者不同
 6. 不在 `loop()` 中放任何业务逻辑，不用阻塞式 `readString()`
